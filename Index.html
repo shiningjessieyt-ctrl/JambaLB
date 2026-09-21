@@ -145,10 +145,6 @@
 
   <div class="controls">
     <div class="control-group">
-      <label for="apiKey">API Key</label>
-      <input type="password" id="apiKey" placeholder="Enter API Key">
-    </div>
-    <div class="control-group">
       <label for="startAt">Start Date</label>
       <input type="date" id="startAt">
     </div>
@@ -161,7 +157,7 @@
 
   <div class="leaderboard-card">
     <div class="status-bar">
-      <span id="statusText">Enter configuration to load data.</span>
+      <span id="statusText">Select dates to load leaderboard.</span>
       <span id="cacheText"></span>
     </div>
     <table>
@@ -182,7 +178,9 @@
 </div>
 
 <script>
-  // Setup default dates (last 7 days)
+  // YOUR BACKEND PROXY URL (Replace with your actual Render URL)
+  const PROXY_URL = 'https://jambalb-1.onrender.com/api/leaderboard';
+
   const today = new Date();
   const prior = new Date();
   prior.setDate(today.getDate() - 7);
@@ -193,62 +191,32 @@
   let rawData = [];
 
   async function loadLeaderboard() {
-    const key = document.getElementById('apiKey').value.trim();
     const startAt = document.getElementById('startAt').value;
     const endAt = document.getElementById('endAt').value;
     const btn = document.getElementById('fetchBtn');
     const statusText = document.getElementById('statusText');
 
-    if (!key || !startAt || !endAt) {
-      alert('Please fill out the API key and date fields.');
+    if (!startAt || !endAt) {
+      alert('Please select date range.');
       return;
     }
 
-    const cacheKey = `leaderboard_weighted_${key}_${startAt}_${endAt}`;
-    const cached = localStorage.getItem(cacheKey);
-    const now = Date.now();
-
-    // Check 15-minute rate limit cache (15 * 60 * 1000 ms = 900000)
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (now - parsed.timestamp < 900000) {
-        rawData = parsed.data;
-        renderTable();
-        const minutesLeft = Math.ceil((900000 - (now - parsed.timestamp)) / 60000);
-        document.getElementById('cacheText').innerText = `Cached (Refreshes in ${minutesLeft}m)`;
-        statusText.innerText = 'Loaded from local cache.';
-        return;
-      }
-    }
-
-    // Fetch fresh data
     btn.disabled = true;
-    statusText.innerText = 'Fetching fresh data...';
-    document.getElementById('cacheText').innerText = '';
-
-    const url = `https://api.roulobets.com/v1/external/affiliates?start_at=${startAt}&end_at=${endAt}&key=${encodeURIComponent(key)}&weighted=true`;
+    statusText.innerText = 'Fetching data...';
 
     try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`API returned status ${response.status}`);
-      }
-      const data = await response.json();
+      const response = await fetch(`${PROXY_URL}?start_at=${startAt}&end_at=${endAt}`);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       
+      const data = await response.json();
       rawData = data.affiliates || [];
 
-      // Store in cache
-      localStorage.setItem(cacheKey, JSON.stringify({
-        timestamp: now,
-        data: rawData
-      }));
-
+      document.getElementById('cacheText').innerText = data.cached ? 'Cached (Refreshes every 15m)' : 'Live Data';
       statusText.innerText = 'Data successfully loaded.';
-      document.getElementById('cacheText').innerText = 'Live Data (Cached for 15m)';
       renderTable();
     } catch (err) {
       console.error(err);
-      statusText.innerText = 'Error fetching data. Check console or API key.';
+      statusText.innerText = 'Error fetching data. Ensure proxy server is running.';
     } finally {
       btn.disabled = false;
     }
@@ -263,7 +231,6 @@
       return;
     }
 
-    // Sort descending strictly by weighted_wagered_amount
     const sorted = [...rawData].sort((a, b) => (parseFloat(b.weighted_wagered_amount) || 0) - (parseFloat(a.weighted_wagered_amount) || 0));
 
     sorted.forEach((item, index) => {
@@ -288,6 +255,9 @@
   function escapeHtml(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
+
+  // Load automatically when page opens
+  window.onload = loadLeaderboard;
 </script>
 
 </body>
