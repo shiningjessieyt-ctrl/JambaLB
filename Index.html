@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Referral Wager Leaderboard</title>
+  <style>
+    :root {
+      --bg-color: #0f172a;
+      --card-bg: #1e293b;
+      --accent: #6366f1;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --border: #334155;
+      --gold: #fbbf24;
+      --silver: #94a3b8;
+      --bronze: #d97706;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text);
+      margin: 0;
+      padding: 2rem;
+      display: flex;
+      justify-content: center;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 800px;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    .controls {
+      background: var(--card-bg);
+      padding: 1.5rem;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    label {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    input, button {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.6rem 0.8rem;
+      border-radius: 6px;
+      font-size: 0.95rem;
+    }
+
+    button {
+      background: var(--accent);
+      color: white;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: opacity 0.2s;
+      margin-top: auto;
+    }
+
+    button:hover { opacity: 0.9; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .leaderboard-card {
+      background: var(--card-bg);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    .status-bar {
+      padding: 0.75rem 1.5rem;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+
+    th, td {
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    th {
+      background: #182232;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+
+    tr:last-child td { border-bottom: none; }
+    
+    .rank { font-weight: bold; width: 80px; }
+    .rank-1 { color: var(--gold); }
+    .rank-2 { color: var(--silver); }
+    .rank-3 { color: var(--bronze); }
+
+    .amount {
+      font-family: monospace;
+      font-size: 1.05rem;
+      font-weight: 600;
+      text-align: right;
+    }
+
+    th.amount-header {
+      text-align: right;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <h1>Referral Wager Leaderboard</h1>
+  </div>
+
+  <div class="controls">
+    <div class="control-group">
+      <label for="apiKey">API Key</label>
+      <input type="password" id="apiKey" placeholder="Enter API Key">
+    </div>
+    <div class="control-group">
+      <label for="startAt">Start Date</label>
+      <input type="date" id="startAt">
+    </div>
+    <div class="control-group">
+      <label for="endAt">End Date</label>
+      <input type="date" id="endAt">
+    </div>
+    <button id="fetchBtn" onclick="loadLeaderboard()">Update Leaderboard</button>
+  </div>
+
+  <div class="leaderboard-card">
+    <div class="status-bar">
+      <span id="statusText">Enter configuration to load data.</span>
+      <span id="cacheText"></span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Rank</th>
+          <th>User</th>
+          <th class="amount-header">Weighted Wager</th>
+        </tr>
+      </thead>
+      <tbody id="leaderboardBody">
+        <tr>
+          <td colspan="3" style="text-align:center; color: var(--text-muted);">No data loaded</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  // Setup default dates (last 7 days)
+  const today = new Date();
+  const prior = new Date();
+  prior.setDate(today.getDate() - 7);
+  
+  document.getElementById('endAt').value = today.toISOString().split('T')[0];
+  document.getElementById('startAt').value = prior.toISOString().split('T')[0];
+
+  let rawData = [];
+
+  async function loadLeaderboard() {
+    const key = document.getElementById('apiKey').value.trim();
+    const startAt = document.getElementById('startAt').value;
+    const endAt = document.getElementById('endAt').value;
+    const btn = document.getElementById('fetchBtn');
+    const statusText = document.getElementById('statusText');
+
+    if (!key || !startAt || !endAt) {
+      alert('Please fill out the API key and date fields.');
+      return;
+    }
+
+    const cacheKey = `leaderboard_weighted_${key}_${startAt}_${endAt}`;
+    const cached = localStorage.getItem(cacheKey);
+    const now = Date.now();
+
+    // Check 15-minute rate limit cache (15 * 60 * 1000 ms = 900000)
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (now - parsed.timestamp < 900000) {
+        rawData = parsed.data;
+        renderTable();
+        const minutesLeft = Math.ceil((900000 - (now - parsed.timestamp)) / 60000);
+        document.getElementById('cacheText').innerText = `Cached (Refreshes in ${minutesLeft}m)`;
+        statusText.innerText = 'Loaded from local cache.';
+        return;
+      }
+    }
+
+    // Fetch fresh data
+    btn.disabled = true;
+    statusText.innerText = 'Fetching fresh data...';
+    document.getElementById('cacheText').innerText = '';
+
+    const url = `https://api.roulobets.com/v1/external/affiliates?start_at=${startAt}&end_at=${endAt}&key=${encodeURIComponent(key)}&weighted=true`;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`API returned status ${response.status}`);
+      }
+      const data = await response.json();
+      
+      rawData = data.affiliates || [];
+
+      // Store in cache
+      localStorage.setItem(cacheKey, JSON.stringify({
+        timestamp: now,
+        data: rawData
+      }));
+
+      statusText.innerText = 'Data successfully loaded.';
+      document.getElementById('cacheText').innerText = 'Live Data (Cached for 15m)';
+      renderTable();
+    } catch (err) {
+      console.error(err);
+      statusText.innerText = 'Error fetching data. Check console or API key.';
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function renderTable() {
+    const tbody = document.getElementById('leaderboardBody');
+    tbody.innerHTML = '';
+
+    if (!rawData || rawData.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color: var(--text-muted);">No wager data found for this range.</td></tr>`;
+      return;
+    }
+
+    // Sort descending strictly by weighted_wagered_amount
+    const sorted = [...rawData].sort((a, b) => (parseFloat(b.weighted_wagered_amount) || 0) - (parseFloat(a.weighted_wagered_amount) || 0));
+
+    sorted.forEach((item, index) => {
+      const rankNum = index + 1;
+      const rankClass = rankNum <= 3 ? `rank-${rankNum}` : '';
+      const username = item.username || 'Anonymous';
+      const weightedAmount = parseFloat(item.weighted_wagered_amount || 0).toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td class="rank ${rankClass}">#${rankNum}</td>
+        <td>${escapeHtml(username)}</td>
+        <td class="amount">$${weightedAmount}</td>
+      `;
+      tbody.appendChild(row);
+    });
+  }
+
+  function escapeHtml(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+</script>
+
+</body>
+</html>
